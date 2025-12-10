@@ -1,0 +1,18 @@
+{
+  "name": "lms-demo-backend",
+  "version": "1.0.0",
+  "description": "Simple Express.js backend for AI grading demo",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --watch server.js",
+    "start": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "nodemon": "^3.1.11",
+    "openai": "^4.20.0"
+  }
+}
