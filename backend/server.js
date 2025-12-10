@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -17,17 +18,30 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
 
-// Simple in-memory storage (for demo)
-let assignments = [];
-let submissions = [];
-let assignmentIdCounter = 1;
-let submissionIdCounter = 1;
+// Initialize Supabase
+const supabaseUrl = process.env.SUPABASE_URL || 'https://yntmdbalhjgmiyfauaui.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InludG1kYmFsaGpnbWl5ZmF1YXVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzODIxNjYsImV4cCI6MjA4MDk1ODE2Nn0.xM8gJ0eiiN2hNqcVNYOfCDv3nqQGA5pwGkAmpa1-Mv0';
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+console.log('✅ Supabase initialized');
 
 // Seed sample assignments for demo
-function seedAssignments() {
+async function seedAssignments() {
+  // Check if assignments already exist
+  const { data: existingAssignments } = await supabase
+    .from('assignments')
+    .select('id')
+    .limit(1);
+  
+  if (existingAssignments && existingAssignments.length > 0) {
+    console.log('📚 Assignments already exist in database, skipping seed');
+    return;
+  }
+
+  const assignmentsToSeed = [];
+
   // Mathematics Assignment - Calculus
-  assignments.push({
-    id: assignmentIdCounter++,
+  assignmentsToSeed.push({
     title: 'Calculus I - Derivatives and Applications',
     description: 'This assignment covers fundamental concepts of derivatives, including the power rule, chain rule, and applications to optimization problems.',
     questions: [
@@ -97,13 +111,12 @@ function seedAssignments() {
         marks: 2
       }
     ],
-    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() // Created 2 days ago
+    due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
   });
 
   // Physics Assignment - Mechanics
-  assignments.push({
-    id: assignmentIdCounter++,
+  assignmentsToSeed.push({
     title: 'Physics I - Newtonian Mechanics',
     description: 'This assignment covers Newton\'s laws of motion, forces, and energy conservation principles.',
     questions: [
@@ -173,13 +186,12 @@ function seedAssignments() {
         marks: 2
       }
     ],
-    dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days from now
-    createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() // Created 1 day ago
+    due_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
   });
 
   // Mathematics Assignment - Linear Algebra
-  assignments.push({
-    id: assignmentIdCounter++,
+  assignmentsToSeed.push({
     title: 'Linear Algebra - Matrix Operations',
     description: 'This assignment covers matrix multiplication, determinants, and solving systems of linear equations.',
     questions: [
@@ -249,13 +261,12 @@ function seedAssignments() {
         marks: 2
       }
     ],
-    dueDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(), // 10 days from now
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() // Created 3 days ago
+    due_date: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
   });
 
   // Physics Assignment - Electromagnetism
-  assignments.push({
-    id: assignmentIdCounter++,
+  assignmentsToSeed.push({
     title: 'Physics II - Electric Fields and Potential',
     description: 'This assignment covers electric fields, electric potential, and Gauss\'s law applications.',
     questions: [
@@ -325,9 +336,21 @@ function seedAssignments() {
         marks: 2
       }
     ],
-    dueDate: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(), // 6 days from now
-    createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString() // Created 4 days ago
+    due_date: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
   });
+
+  // Insert all assignments into Supabase
+  const { data, error } = await supabase
+    .from('assignments')
+    .insert(assignmentsToSeed)
+    .select();
+
+  if (error) {
+    console.error('Error seeding assignments:', error);
+  } else {
+    console.log(`📝 Seeded ${data.length} assignments into Supabase`);
+  }
 }
 
 // ============================================
@@ -358,16 +381,39 @@ app.get('/api/info', (req, res) => {
 // ============================================
 
 // Get all assignments (teacher view)
-app.get('/api/teacher/assignments', (req, res) => {
+app.get('/api/teacher/assignments', async (req, res) => {
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from('assignments')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (assignmentsError) {
+    return res.status(500).json({ error: assignmentsError.message });
+  }
+
+  const { data: allSubmissions, error: submissionsError } = await supabase
+    .from('submissions')
+    .select('*');
+
+  if (submissionsError) {
+    return res.status(500).json({ error: submissionsError.message });
+  }
+
   const assignmentsWithStats = assignments.map(assignment => {
-    const assignmentSubmissions = submissions.filter(s => s.assignmentId === assignment.id);
+    const assignmentSubmissions = allSubmissions.filter(s => s.assignment_id === assignment.id);
     return {
-      ...assignment,
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      questions: assignment.questions,
+      dueDate: assignment.due_date,
+      createdAt: assignment.created_at,
       totalSubmissions: assignmentSubmissions.length,
       gradedCount: assignmentSubmissions.filter(s => s.status === 'graded').length,
       pendingCount: assignmentSubmissions.filter(s => s.status === 'pending').length,
     };
   });
+
   res.json(assignmentsWithStats);
 });
 
@@ -412,11 +458,36 @@ app.get('/api/teacher/assignments/:id', (req, res) => {
 });
 
 // Get submissions for an assignment
-app.get('/api/teacher/assignments/:id/submissions', (req, res) => {
-  const assignmentSubmissions = submissions.filter(
-    s => s.assignmentId === parseInt(req.params.id)
-  );
-  res.json(assignmentSubmissions);
+app.get('/api/teacher/assignments/:id/submissions', async (req, res) => {
+  const assignmentId = parseInt(req.params.id);
+  
+  const { data: submissions, error } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('assignment_id', assignmentId)
+    .order('submitted_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Transform to API format
+  const result = submissions.map(s => ({
+    id: s.id,
+    assignmentId: s.assignment_id,
+    studentName: s.student_name,
+    answers: s.answers,
+    status: s.status,
+    submittedAt: s.submitted_at,
+    aiScore: s.ai_score,
+    finalScore: s.final_score,
+    finalGrade: s.final_grade,
+    teacherNotes: s.teacher_notes,
+    gradedAt: s.graded_at,
+    finalizedAt: s.finalized_at,
+  }));
+
+  res.json(result);
 });
 
 // Get all submissions (teacher view)
@@ -442,33 +513,64 @@ app.get('/api/teacher/submissions/:id', (req, res) => {
 // Auto-grade all submissions
 app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
   const assignmentId = parseInt(req.params.id);
-  const assignment = assignments.find(a => a.id === assignmentId);
   
-  if (!assignment) {
+  // Get assignment
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', assignmentId)
+    .single();
+  
+  if (assignmentError || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
 
-  const assignmentSubmissions = submissions.filter(s => s.assignmentId === assignmentId);
+  // Get pending submissions
+  const { data: assignmentSubmissions, error: submissionsError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('assignment_id', assignmentId)
+    .eq('status', 'pending');
+
+  if (submissionsError) {
+    return res.status(500).json({ error: submissionsError.message });
+  }
+
   let gradedCount = 0;
 
   for (const submission of assignmentSubmissions) {
-    if (submission.status === 'pending') {
-      // Auto-grade
-      let totalScore = 0;
+    // Auto-grade
+    let totalScore = 0;
+    const updatedAnswers = submission.answers.map(answer => {
+      const question = assignment.questions.find(q => q.questionNumber === answer.questionNumber);
+      if (!question) return answer;
       
-      for (const answer of submission.answers) {
-        const question = assignment.questions.find(q => q.questionNumber === answer.questionNumber);
-        const studentSelected = new Set(answer.selectedOptions);
-        const correctOptions = new Set(question.correctOptions);
-        
-        answer.isCorrect = JSON.stringify([...studentSelected].sort()) === JSON.stringify([...correctOptions].sort());
-        answer.score = answer.isCorrect ? question.marks : 0;
-        totalScore += answer.score;
-      }
+      const studentSelected = new Set(answer.selectedOptions);
+      const correctOptions = new Set(question.correctOptions);
+      
+      const isCorrect = JSON.stringify([...studentSelected].sort()) === JSON.stringify([...correctOptions].sort());
+      const score = isCorrect ? question.marks : 0;
+      totalScore += score;
+      
+      return {
+        ...answer,
+        isCorrect,
+        score,
+      };
+    });
 
-      submission.aiScore = totalScore;
-      submission.status = 'submitted';
-      submission.gradedAt = new Date().toISOString();
+    // Update submission in Supabase
+    const { error: updateError } = await supabase
+      .from('submissions')
+      .update({
+        answers: updatedAnswers,
+        ai_score: totalScore,
+        status: 'submitted',
+        graded_at: new Date().toISOString(),
+      })
+      .eq('id', submission.id);
+
+    if (!updateError) {
       gradedCount++;
     }
   }
@@ -521,21 +623,57 @@ app.post('/api/teacher/submissions/:id/generate-feedback', async (req, res) => {
 });
 
 // Finalize grade
-app.post('/api/teacher/submissions/:id/finalize', (req, res) => {
-  const submission = submissions.find(s => s.id === parseInt(req.params.id));
-  if (!submission) {
+app.post('/api/teacher/submissions/:id/finalize', async (req, res) => {
+  const submissionId = parseInt(req.params.id);
+  
+  // Get submission
+  const { data: submission, error: getError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (getError || !submission) {
     return res.status(404).json({ error: 'Submission not found' });
   }
 
   const { finalScore, finalGrade, teacherNotes } = req.body;
   
-  submission.finalScore = finalScore || submission.aiScore;
-  submission.finalGrade = finalGrade;
-  submission.teacherNotes = teacherNotes || '';
-  submission.status = 'graded';
-  submission.finalizedAt = new Date().toISOString();
+  // Update submission
+  const { data: updatedSubmission, error: updateError } = await supabase
+    .from('submissions')
+    .update({
+      final_score: finalScore || submission.ai_score,
+      final_grade: finalGrade,
+      teacher_notes: teacherNotes || '',
+      status: 'graded',
+      finalized_at: new Date().toISOString(),
+    })
+    .eq('id', submissionId)
+    .select()
+    .single();
 
-  res.json(submission);
+  if (updateError) {
+    return res.status(500).json({ error: updateError.message });
+  }
+
+  // Transform to API format
+  const result = {
+    id: updatedSubmission.id,
+    assignmentId: updatedSubmission.assignment_id,
+    studentName: updatedSubmission.student_name,
+    answers: updatedSubmission.answers,
+    status: updatedSubmission.status,
+    submittedAt: updatedSubmission.submitted_at,
+    aiScore: updatedSubmission.ai_score,
+    finalScore: updatedSubmission.final_score,
+    finalGrade: updatedSubmission.final_grade,
+    teacherNotes: updatedSubmission.teacher_notes,
+    gradedAt: updatedSubmission.graded_at,
+    finalizedAt: updatedSubmission.finalized_at,
+  };
+
+  res.json(result);
 });
 
 // ============================================
@@ -569,30 +707,56 @@ app.get('/api/student/assignments/:id', (req, res) => {
 });
 
 // Submit assignment
-app.post('/api/student/assignments/:id/submit', (req, res) => {
+app.post('/api/student/assignments/:id/submit', async (req, res) => {
   const assignmentId = parseInt(req.params.id);
-  const assignment = assignments.find(a => a.id === assignmentId);
   
-  if (!assignment) {
+  // Check if assignment exists
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', assignmentId)
+    .single();
+  
+  if (assignmentError || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
 
   const { studentName, answers } = req.body;
 
-  const submission = {
-    id: submissionIdCounter++,
-    assignmentId,
-    studentName,
-    answers: answers.map(a => ({
-      questionNumber: a.questionNumber,
-      selectedOptions: a.selectedOptions,
-    })),
-    status: 'pending',
-    submittedAt: new Date().toISOString(),
+  // Insert submission into Supabase
+  const { data: submission, error } = await supabase
+    .from('submissions')
+    .insert([{
+      assignment_id: assignmentId,
+      student_name: studentName,
+      answers: answers.map(a => ({
+        questionNumber: a.questionNumber,
+        selectedOptions: a.selectedOptions,
+      })),
+      status: 'pending',
+      submitted_at: new Date().toISOString(),
+    }])
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Transform to API format
+  const result = {
+    id: submission.id,
+    assignmentId: submission.assignment_id,
+    studentName: submission.student_name,
+    answers: submission.answers,
+    status: submission.status,
+    submittedAt: submission.submitted_at,
+    aiScore: submission.ai_score,
+    finalScore: submission.final_score,
+    finalGrade: submission.final_grade,
   };
 
-  submissions.push(submission);
-  res.json(submission);
+  res.json(result);
 });
 
 // Get student's submission
@@ -769,14 +933,19 @@ app.get('/', (req, res) => {
 // START SERVER
 // ============================================
 
-// Seed sample assignments on server start
-seedAssignments();
+// Initialize and start server
+async function startServer() {
+  // Seed sample assignments on server start
+  await seedAssignments();
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 Teacher API: http://localhost:${PORT}/api/teacher`);
-  console.log(`👨‍🎓 Student API: http://localhost:${PORT}/api/student`);
-  console.log(`❤️  Health Check: http://localhost:${PORT}/api/health`);
-  console.log(`📝 Seeded ${assignments.length} sample assignments`);
-});
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📚 Teacher API: http://localhost:${PORT}/api/teacher`);
+    console.log(`👨‍🎓 Student API: http://localhost:${PORT}/api/student`);
+    console.log(`❤️  Health Check: http://localhost:${PORT}/api/health`);
+    console.log(`💾 Using Supabase for persistent storage`);
+  });
+}
+
+startServer();
 
