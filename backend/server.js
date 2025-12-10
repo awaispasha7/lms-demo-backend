@@ -367,12 +367,21 @@ app.get('/api/health', (req, res) => {
 });
 
 // Get server info
-app.get('/api/info', (req, res) => {
+app.get('/api/info', async (req, res) => {
+  const { count: assignmentCount } = await supabase
+    .from('assignments')
+    .select('*', { count: 'exact', head: true });
+
+  const { count: submissionCount } = await supabase
+    .from('submissions')
+    .select('*', { count: 'exact', head: true });
+
   res.json({
-    totalAssignments: assignments.length,
-    totalSubmissions: submissions.length,
+    totalAssignments: assignmentCount || 0,
+    totalSubmissions: submissionCount || 0,
     server: 'LMS Demo API',
-    version: '1.0.0'
+    version: '1.0.0',
+    storage: 'Supabase'
   });
 });
 
@@ -382,43 +391,56 @@ app.get('/api/info', (req, res) => {
 
 // Get all assignments (teacher view)
 app.get('/api/teacher/assignments', async (req, res) => {
-  const { data: assignments, error: assignmentsError } = await supabase
-    .from('assignments')
-    .select('*')
-    .order('created_at', { ascending: false });
+  try {
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('assignments')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  if (assignmentsError) {
-    return res.status(500).json({ error: assignmentsError.message });
+    if (assignmentsError) {
+      console.error('Error fetching assignments:', assignmentsError);
+      return res.status(500).json({ error: assignmentsError.message });
+    }
+
+    if (!assignments || assignments.length === 0) {
+      return res.json([]);
+    }
+
+    const { data: allSubmissions, error: submissionsError } = await supabase
+      .from('submissions')
+      .select('*');
+
+    if (submissionsError) {
+      console.error('Error fetching submissions:', submissionsError);
+      // Continue with empty submissions array if error
+    }
+
+    const submissions = allSubmissions || [];
+
+    const assignmentsWithStats = assignments.map(assignment => {
+      const assignmentSubmissions = submissions.filter(s => s.assignment_id === assignment.id);
+      return {
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        questions: assignment.questions,
+        dueDate: assignment.due_date,
+        createdAt: assignment.created_at,
+        totalSubmissions: assignmentSubmissions.length,
+        gradedCount: assignmentSubmissions.filter(s => s.status === 'graded').length,
+        pendingCount: assignmentSubmissions.filter(s => s.status === 'pending').length,
+      };
+    });
+
+    res.json(assignmentsWithStats);
+  } catch (err) {
+    console.error('Unexpected error in teacher assignments:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  const { data: allSubmissions, error: submissionsError } = await supabase
-    .from('submissions')
-    .select('*');
-
-  if (submissionsError) {
-    return res.status(500).json({ error: submissionsError.message });
-  }
-
-  const assignmentsWithStats = assignments.map(assignment => {
-    const assignmentSubmissions = allSubmissions.filter(s => s.assignment_id === assignment.id);
-    return {
-      id: assignment.id,
-      title: assignment.title,
-      description: assignment.description,
-      questions: assignment.questions,
-      dueDate: assignment.due_date,
-      createdAt: assignment.created_at,
-      totalSubmissions: assignmentSubmissions.length,
-      gradedCount: assignmentSubmissions.filter(s => s.status === 'graded').length,
-      pendingCount: assignmentSubmissions.filter(s => s.status === 'pending').length,
-    };
-  });
-
-  res.json(assignmentsWithStats);
 });
 
 // Create new assignment
-app.post('/api/teacher/assignments', (req, res) => {
+app.post('/api/teacher/assignments', async (req, res) => {
   const { title, description, questions, dueDate } = req.body;
 
   // Validate: All questions must have rubric and answer keys
@@ -432,29 +454,64 @@ app.post('/api/teacher/assignments', (req, res) => {
     });
   }
 
-  const assignment = {
-    id: assignmentIdCounter++,
-    title,
-    description,
-    questions: questions.map((q, idx) => ({
-      ...q,
-      questionNumber: idx + 1,
-    })),
-    dueDate,
-    createdAt: new Date().toISOString(),
+  // Insert into Supabase
+  const { data: assignment, error } = await supabase
+    .from('assignments')
+    .insert([{
+      title,
+      description,
+      questions: questions.map((q, idx) => ({
+        ...q,
+        questionNumber: idx + 1,
+      })),
+      due_date: dueDate,
+      created_at: new Date().toISOString(),
+    }])
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Transform to API format
+  const result = {
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    questions: assignment.questions,
+    dueDate: assignment.due_date,
+    createdAt: assignment.created_at,
   };
 
-  assignments.push(assignment);
-  res.json(assignment);
+  res.json(result);
 });
 
 // Get assignment details
-app.get('/api/teacher/assignments/:id', (req, res) => {
-  const assignment = assignments.find(a => a.id === parseInt(req.params.id));
-  if (!assignment) {
+app.get('/api/teacher/assignments/:id', async (req, res) => {
+  const assignmentId = parseInt(req.params.id);
+  
+  const { data: assignment, error } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', assignmentId)
+    .single();
+
+  if (error || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
-  res.json(assignment);
+
+  // Transform to API format
+  const result = {
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    questions: assignment.questions,
+    dueDate: assignment.due_date,
+    createdAt: assignment.created_at,
+  };
+
+  res.json(result);
 });
 
 // Get submissions for an assignment
@@ -491,23 +548,81 @@ app.get('/api/teacher/assignments/:id/submissions', async (req, res) => {
 });
 
 // Get all submissions (teacher view)
-app.get('/api/teacher/submissions', (req, res) => {
-  res.json(submissions);
+app.get('/api/teacher/submissions', async (req, res) => {
+  const { data: submissions, error } = await supabase
+    .from('submissions')
+    .select('*')
+    .order('submitted_at', { ascending: false });
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Transform to API format
+  const result = submissions.map(s => ({
+    id: s.id,
+    assignmentId: s.assignment_id,
+    studentName: s.student_name,
+    answers: s.answers,
+    status: s.status,
+    submittedAt: s.submitted_at,
+    aiScore: s.ai_score,
+    finalScore: s.final_score,
+    finalGrade: s.final_grade,
+    teacherNotes: s.teacher_notes,
+    gradedAt: s.graded_at,
+    finalizedAt: s.finalized_at,
+  }));
+
+  res.json(result);
 });
 
 // Get single submission by ID (teacher view)
-app.get('/api/teacher/submissions/:id', (req, res) => {
-  const submission = submissions.find(s => s.id === parseInt(req.params.id));
-  if (!submission) {
+app.get('/api/teacher/submissions/:id', async (req, res) => {
+  const submissionId = parseInt(req.params.id);
+  
+  const { data: submission, error: submissionError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (submissionError || !submission) {
     return res.status(404).json({ error: 'Submission not found' });
   }
   
-  // Include assignment details
-  const assignment = assignments.find(a => a.id === submission.assignmentId);
-  res.json({
-    ...submission,
-    assignment: assignment || null
-  });
+  // Get assignment details
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', submission.assignment_id)
+    .single();
+
+  // Transform to API format
+  const result = {
+    id: submission.id,
+    assignmentId: submission.assignment_id,
+    studentName: submission.student_name,
+    answers: submission.answers,
+    status: submission.status,
+    submittedAt: submission.submitted_at,
+    aiScore: submission.ai_score,
+    finalScore: submission.final_score,
+    finalGrade: submission.final_grade,
+    teacherNotes: submission.teacher_notes,
+    gradedAt: submission.graded_at,
+    finalizedAt: submission.finalized_at,
+    assignment: assignment ? {
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      questions: assignment.questions,
+      dueDate: assignment.due_date,
+      createdAt: assignment.created_at,
+    } : null
+  };
+
+  res.json(result);
 });
 
 // Auto-grade all submissions
@@ -580,13 +695,25 @@ app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
 
 // Generate AI feedback for a submission
 app.post('/api/teacher/submissions/:id/generate-feedback', async (req, res) => {
-  const submission = submissions.find(s => s.id === parseInt(req.params.id));
-  if (!submission) {
+  const submissionId = parseInt(req.params.id);
+  
+  const { data: submission, error: submissionError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (submissionError || !submission) {
     return res.status(404).json({ error: 'Submission not found' });
   }
 
-  const assignment = assignments.find(a => a.id === submission.assignmentId);
-  if (!assignment) {
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', submission.assignment_id)
+    .single();
+
+  if (assignmentError || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
 
@@ -595,28 +722,44 @@ app.post('/api/teacher/submissions/:id/generate-feedback', async (req, res) => {
   }
 
   let feedbackCount = 0;
+  const updatedAnswers = [...submission.answers];
 
-  for (const answer of submission.answers) {
+  for (let i = 0; i < updatedAnswers.length; i++) {
+    const answer = updatedAnswers[i];
     if (!answer.aiFeedback) {
       const question = assignment.questions.find(q => q.questionNumber === answer.questionNumber);
       
-      try {
-        const feedback = await generateEncouragingFeedback(
-          question,
-          answer.selectedOptions,
-          answer.isCorrect
-        );
-        
-        answer.aiFeedback = feedback;
-        answer.feedbackGeneratedAt = new Date().toISOString();
-        feedbackCount++;
-      } catch (error) {
-        console.error('Error generating feedback:', error);
-        answer.aiFeedback = answer.isCorrect
-          ? 'Great job! You got this question correct. Keep up the excellent work!'
-          : 'This question needs another look. Review the concepts and try again—you\'ve got this!';
+      if (question) {
+        try {
+          const feedback = await generateEncouragingFeedback(
+            question,
+            answer.selectedOptions,
+            answer.isCorrect
+          );
+          
+          updatedAnswers[i].aiFeedback = feedback;
+          updatedAnswers[i].feedbackGeneratedAt = new Date().toISOString();
+          feedbackCount++;
+        } catch (error) {
+          console.error('Error generating feedback:', error);
+          updatedAnswers[i].aiFeedback = answer.isCorrect
+            ? 'Great job! You got this question correct. Keep up the excellent work!'
+            : 'This question needs another look. Review the concepts and try again—you\'ve got this!';
+        }
       }
     }
+  }
+
+  // Update submission in Supabase
+  const { error: updateError } = await supabase
+    .from('submissions')
+    .update({
+      answers: updatedAnswers,
+    })
+    .eq('id', submissionId);
+
+  if (updateError) {
+    return res.status(500).json({ error: updateError.message });
   }
 
   res.json({ message: `Generated feedback for ${feedbackCount} questions`, feedbackCount });
@@ -681,20 +824,59 @@ app.post('/api/teacher/submissions/:id/finalize', async (req, res) => {
 // ============================================
 
 // Get available assignments
-app.get('/api/student/assignments', (req, res) => {
-  res.json(assignments);
+app.get('/api/student/assignments', async (req, res) => {
+  try {
+    const { data: assignments, error } = await supabase
+      .from('assignments')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching assignments:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!assignments || assignments.length === 0) {
+      return res.json([]);
+    }
+
+    // Transform to API format
+    const result = assignments.map(a => ({
+      id: a.id,
+      title: a.title,
+      description: a.description,
+      dueDate: a.due_date,
+      createdAt: a.created_at,
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Unexpected error in student assignments:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Get assignment details
-app.get('/api/student/assignments/:id', (req, res) => {
-  const assignment = assignments.find(a => a.id === parseInt(req.params.id));
-  if (!assignment) {
+app.get('/api/student/assignments/:id', async (req, res) => {
+  const assignmentId = parseInt(req.params.id);
+  
+  const { data: assignment, error } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', assignmentId)
+    .single();
+
+  if (error || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
   
   // Don't send correct answers to students
   const studentView = {
-    ...assignment,
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    dueDate: assignment.due_date,
+    createdAt: assignment.created_at,
     questions: assignment.questions.map(q => ({
       questionNumber: q.questionNumber,
       questionText: q.questionText,
@@ -760,50 +942,140 @@ app.post('/api/student/assignments/:id/submit', async (req, res) => {
 });
 
 // Get student's submission
-app.get('/api/student/submissions/:id', (req, res) => {
-  const submission = submissions.find(s => s.id === parseInt(req.params.id));
-  if (!submission) {
+app.get('/api/student/submissions/:id', async (req, res) => {
+  const submissionId = parseInt(req.params.id);
+  
+  const { data: submission, error } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (error || !submission) {
     return res.status(404).json({ error: 'Submission not found' });
   }
-  res.json(submission);
+
+  // Transform to API format
+  const result = {
+    id: submission.id,
+    assignmentId: submission.assignment_id,
+    studentName: submission.student_name,
+    answers: submission.answers,
+    status: submission.status,
+    submittedAt: submission.submitted_at,
+    aiScore: submission.ai_score,
+    finalScore: submission.final_score,
+    finalGrade: submission.final_grade,
+  };
+
+  res.json(result);
 });
 
 // Get all student's submissions (by student name)
-app.get('/api/student/submissions', (req, res) => {
+app.get('/api/student/submissions', async (req, res) => {
   const { studentName } = req.query;
   
+  let query = supabase
+    .from('submissions')
+    .select('*')
+    .order('submitted_at', { ascending: false });
+
   if (studentName) {
-    const studentSubmissions = submissions
-      .filter(s => s.studentName.toLowerCase() === studentName.toLowerCase())
-      .map(submission => {
-        const assignment = assignments.find(a => a.id === submission.assignmentId);
-        return {
-          ...submission,
-          assignmentTitle: assignment ? assignment.title : 'Unknown Assignment',
-          assignmentDescription: assignment ? assignment.description : '',
-        };
-      });
-    return res.json(studentSubmissions);
+    query = query.ilike('student_name', studentName);
   }
-  
-  res.json(submissions);
+
+  const { data: submissions, error } = await query;
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  if (!studentName) {
+    // Transform to API format
+    const result = submissions.map(s => ({
+      id: s.id,
+      assignmentId: s.assignment_id,
+      studentName: s.student_name,
+      answers: s.answers,
+      status: s.status,
+      submittedAt: s.submitted_at,
+      aiScore: s.ai_score,
+      finalScore: s.final_score,
+      finalGrade: s.final_grade,
+    }));
+    return res.json(result);
+  }
+
+  // Get assignments for student submissions
+  const assignmentIds = [...new Set(submissions.map(s => s.assignment_id))];
+  const { data: assignments } = await supabase
+    .from('assignments')
+    .select('*')
+    .in('id', assignmentIds);
+
+  const assignmentsMap = {};
+  if (assignments) {
+    assignments.forEach(a => {
+      assignmentsMap[a.id] = a;
+    });
+  }
+
+  // Transform to API format with assignment info
+  const result = submissions.map(submission => {
+    const assignment = assignmentsMap[submission.assignment_id];
+    return {
+      id: submission.id,
+      assignmentId: submission.assignment_id,
+      studentName: submission.student_name,
+      answers: submission.answers,
+      status: submission.status,
+      submittedAt: submission.submitted_at,
+      aiScore: submission.ai_score,
+      finalScore: submission.final_score,
+      finalGrade: submission.final_grade,
+      assignmentTitle: assignment ? assignment.title : 'Unknown Assignment',
+      assignmentDescription: assignment ? assignment.description : '',
+    };
+  });
+
+  res.json(result);
 });
 
 // Get student's submission with full details (including feedback)
-app.get('/api/student/submissions/:id/details', (req, res) => {
-  const submission = submissions.find(s => s.id === parseInt(req.params.id));
-  if (!submission) {
+app.get('/api/student/submissions/:id/details', async (req, res) => {
+  const submissionId = parseInt(req.params.id);
+  
+  const { data: submission, error: submissionError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (submissionError || !submission) {
     return res.status(404).json({ error: 'Submission not found' });
   }
 
-  const assignment = assignments.find(a => a.id === submission.assignmentId);
-  if (!assignment) {
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('id', submission.assignment_id)
+    .single();
+
+  if (assignmentError || !assignment) {
     return res.status(404).json({ error: 'Assignment not found' });
   }
 
   // Return submission with assignment details and question feedback
   const detailedSubmission = {
-    ...submission,
+    id: submission.id,
+    assignmentId: submission.assignment_id,
+    studentName: submission.student_name,
+    answers: submission.answers,
+    status: submission.status,
+    submittedAt: submission.submitted_at,
+    aiScore: submission.ai_score,
+    finalScore: submission.final_score,
+    finalGrade: submission.final_grade,
     assignment: {
       id: assignment.id,
       title: assignment.title,
@@ -935,8 +1207,9 @@ app.get('/', (req, res) => {
 
 // Initialize and start server
 async function startServer() {
-  // Seed sample assignments on server start
-  await seedAssignments();
+  // NOTE: Seed function is disabled - assignments should be inserted via SQL
+  // Uncomment the line below only if you want to seed on server start (not recommended for production)
+  // await seedAssignments();
 
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
@@ -944,6 +1217,7 @@ async function startServer() {
     console.log(`👨‍🎓 Student API: http://localhost:${PORT}/api/student`);
     console.log(`❤️  Health Check: http://localhost:${PORT}/api/health`);
     console.log(`💾 Using Supabase for persistent storage`);
+    console.log(`📝 Seed function disabled - use SQL to insert assignments`);
   });
 }
 
