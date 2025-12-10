@@ -765,6 +765,72 @@ app.post('/api/teacher/submissions/:id/generate-feedback', async (req, res) => {
   res.json({ message: `Generated feedback for ${feedbackCount} questions`, feedbackCount });
 });
 
+// Manual grade a specific question
+app.post('/api/teacher/submissions/:id/manual-grade', async (req, res) => {
+  const submissionId = parseInt(req.params.id);
+  const { questionNumber, isCorrect, score } = req.body;
+  
+  // Get submission
+  const { data: submission, error: getError } = await supabase
+    .from('submissions')
+    .select('*')
+    .eq('id', submissionId)
+    .single();
+
+  if (getError || !submission) {
+    return res.status(404).json({ error: 'Submission not found' });
+  }
+
+  // Update the specific answer
+  const updatedAnswers = submission.answers.map((answer) => {
+    if (answer.questionNumber === questionNumber) {
+      return {
+        ...answer,
+        isCorrect,
+        score: isCorrect ? score : 0,
+      };
+    }
+    return answer;
+  });
+
+  // Calculate new total score
+  const newTotalScore = updatedAnswers.reduce((sum, ans) => sum + (ans.score || 0), 0);
+
+  // Update submission
+  const { data: updatedSubmission, error: updateError } = await supabase
+    .from('submissions')
+    .update({
+      answers: updatedAnswers,
+      ai_score: newTotalScore,
+      status: 'submitted', // Change from pending to submitted when manually graded
+    })
+    .eq('id', submissionId)
+    .select()
+    .single();
+
+  if (updateError) {
+    return res.status(500).json({ error: updateError.message });
+  }
+
+  // Transform to API format
+  const result = {
+    id: updatedSubmission.id,
+    assignmentId: updatedSubmission.assignment_id,
+    studentName: updatedSubmission.student_name,
+    answers: updatedSubmission.answers,
+    status: updatedSubmission.status,
+    submittedAt: updatedSubmission.submitted_at,
+    aiScore: updatedSubmission.ai_score,
+    finalScore: updatedSubmission.final_score,
+    finalGrade: updatedSubmission.final_grade,
+    teacherNotes: updatedSubmission.teacher_notes,
+    gradedAt: updatedSubmission.graded_at,
+    finalizedAt: updatedSubmission.finalized_at,
+  };
+
+  res.json(result);
+});
+
 // Finalize grade
 app.post('/api/teacher/submissions/:id/finalize', async (req, res) => {
   const submissionId = parseInt(req.params.id);
