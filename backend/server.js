@@ -653,6 +653,9 @@ app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
 
   let gradedCount = 0;
 
+  // Calculate total possible marks for the assignment
+  const totalPossibleMarks = assignment.questions.reduce((sum, q) => sum + (q.marks || 0), 0);
+
   for (const submission of assignmentSubmissions) {
     // Auto-grade
     let totalScore = 0;
@@ -693,12 +696,23 @@ app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
       };
     }));
 
+    // Calculate percentage and grade
+    const percentage = totalPossibleMarks > 0 ? (totalScore / totalPossibleMarks) * 100 : 0;
+    let grade = 'F';
+    if (percentage >= 90) grade = 'A+';
+    else if (percentage >= 80) grade = 'A';
+    else if (percentage >= 70) grade = 'B';
+    else if (percentage >= 60) grade = 'C';
+    else if (percentage >= 50) grade = 'D';
+
     // Update submission in Supabase
     const { error: updateError } = await supabase
       .from('submissions')
       .update({
         answers: updatedAnswers,
         ai_score: totalScore,
+        final_score: totalScore, // Set final_score as well for consistency
+        final_grade: grade, // Calculate and store grade automatically
         status: 'submitted',
         graded_at: new Date().toISOString(),
       })
