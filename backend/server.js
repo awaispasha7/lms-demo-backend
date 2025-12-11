@@ -968,6 +968,7 @@ app.get('/api/student/assignments/:id', async (req, res) => {
       questionText: q.questionText,
       options: q.options,
       marks: q.marks,
+      type: q.type, // Include type so frontend knows how to render (short_answer, mcq, true_false)
     })),
   };
   
