@@ -1153,31 +1153,33 @@ app.get('/api/student/submissions/:id/details', async (req, res) => {
     return res.status(404).json({ error: 'Assignment not found' });
   }
 
-  // Return submission with assignment details and question feedback
-  const detailedSubmission = {
-    id: submission.id,
-    assignmentId: submission.assignment_id,
-    studentName: submission.student_name,
-    answers: submission.answers,
-    status: submission.status,
-    submittedAt: submission.submitted_at,
-    aiScore: submission.ai_score,
-    finalScore: submission.final_score,
-    finalGrade: submission.final_grade,
-    assignment: {
-      id: assignment.id,
-      title: assignment.title,
-      description: assignment.description,
-      questions: assignment.questions.map(q => ({
-        questionNumber: q.questionNumber,
-        questionText: q.questionText,
-        options: q.options,
-        marks: q.marks,
-        // Include correct answer for student to see after grading
-        correctOptions: q.correctOptions,
-      })),
-    },
-  };
+    // Return submission with assignment details and question feedback
+    const detailedSubmission = {
+      id: submission.id,
+      assignmentId: submission.assignment_id,
+      studentName: submission.student_name,
+      answers: submission.answers,
+      status: submission.status,
+      submittedAt: submission.submitted_at,
+      aiScore: submission.ai_score,
+      finalScore: submission.final_score,
+      finalGrade: submission.final_grade,
+      assignment: {
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        questions: assignment.questions.map(q => ({
+          questionNumber: q.questionNumber,
+          questionText: q.questionText,
+          options: q.options,
+          marks: q.marks,
+          type: q.type, // Include type for rendering
+          rubric: q.rubric, // Include rubric for short answers (only show after grading)
+          // Include correct answer for student to see after grading
+          correctOptions: (submission.status !== 'pending' && submission.ai_score !== null) ? q.correctOptions : undefined,
+        })),
+      },
+    };
 
   res.json(detailedSubmission);
 });
