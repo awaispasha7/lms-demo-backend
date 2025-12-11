@@ -656,15 +656,34 @@ app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
   for (const submission of assignmentSubmissions) {
     // Auto-grade
     let totalScore = 0;
-    const updatedAnswers = submission.answers.map(answer => {
+    const updatedAnswers = await Promise.all(submission.answers.map(async (answer) => {
       const question = assignment.questions.find(q => q.questionNumber === answer.questionNumber);
       if (!question) return answer;
       
-      const studentSelected = new Set(answer.selectedOptions);
-      const correctOptions = new Set(question.correctOptions);
+      let isCorrect = false;
+      let score = 0;
       
-      const isCorrect = JSON.stringify([...studentSelected].sort()) === JSON.stringify([...correctOptions].sort());
-      const score = isCorrect ? question.marks : 0;
+      // Handle short answer questions with LLM
+      if (question.type === 'short_answer' && answer.textAnswer) {
+        try {
+          const gradingResult = await gradeShortAnswer(question, answer.textAnswer);
+          isCorrect = gradingResult.isCorrect;
+          score = gradingResult.score;
+        } catch (error) {
+          console.error(`Error grading short answer for question ${answer.questionNumber}:`, error);
+          // Default to 0 if grading fails
+          isCorrect = false;
+          score = 0;
+        }
+      } else {
+        // Handle MCQ and True/False questions
+        const studentSelected = new Set(answer.selectedOptions || []);
+        const correctOptions = new Set(question.correctOptions || []);
+        
+        isCorrect = JSON.stringify([...studentSelected].sort()) === JSON.stringify([...correctOptions].sort());
+        score = isCorrect ? question.marks : 0;
+      }
+      
       totalScore += score;
       
       return {
@@ -672,7 +691,7 @@ app.post('/api/teacher/assignments/:id/auto-grade', async (req, res) => {
         isCorrect,
         score,
       };
-    });
+    }));
 
     // Update submission in Supabase
     const { error: updateError } = await supabase
@@ -733,8 +752,9 @@ app.post('/api/teacher/submissions/:id/generate-feedback', async (req, res) => {
         try {
           const feedback = await generateEncouragingFeedback(
             question,
-            answer.selectedOptions,
-            answer.isCorrect
+            answer.selectedOptions || [],
+            answer.isCorrect,
+            answer.textAnswer
           );
           
           updatedAnswers[i].aiFeedback = feedback;
@@ -979,7 +999,8 @@ app.post('/api/student/assignments/:id/submit', async (req, res) => {
       student_name: studentName,
       answers: answers.map(a => ({
         questionNumber: a.questionNumber,
-        selectedOptions: a.selectedOptions,
+        selectedOptions: a.selectedOptions || [],
+        textAnswer: a.textAnswer || undefined,
       })),
       status: 'pending',
       submitted_at: new Date().toISOString(),
@@ -1161,12 +1182,122 @@ app.get('/api/student/submissions/:id/details', async (req, res) => {
 });
 
 // ============================================
+// AI GRADING FOR SHORT ANSWERS
+// ============================================
+
+async function gradeShortAnswer(question, studentAnswer) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OpenAI API key not configured');
+  }
+
+  const prompt = `You are a teacher grading a short answer question. Your task is to evaluate the student's response and determine if it demonstrates understanding of the key concepts.
+
+Question: ${question.questionText}
+Maximum Marks: ${question.marks}
+Rubric/Key Points to Look For: ${question.rubric}
+Student's Answer: ${studentAnswer}
+
+Evaluate the student's answer based on the rubric. The answer should demonstrate understanding of the key concepts mentioned in the rubric.
+
+Respond in JSON format only:
+{
+  "isCorrect": true or false,
+  "score": number between 0 and ${question.marks} (full marks if correct, partial marks if partially correct, 0 if incorrect),
+  "reasoning": "brief explanation of why this score was given"
+}
+
+Be fair but strict. Give full marks only if the answer demonstrates clear understanding of all key concepts. Give partial marks if some concepts are covered but not all. Give 0 if the answer is incorrect or doesn't address the question.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an experienced teacher grading student responses. Be fair, consistent, and focus on whether the student demonstrates understanding of the key concepts.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3, // Lower temperature for more consistent grading
+      max_tokens: 200,
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    return {
+      isCorrect: result.isCorrect || false,
+      score: Math.min(Math.max(0, result.score || 0), question.marks), // Clamp between 0 and max marks
+      reasoning: result.reasoning || '',
+    };
+  } catch (error) {
+    console.error('Error grading short answer with LLM:', error);
+    // Fallback: return 0 if LLM fails
+    return {
+      isCorrect: false,
+      score: 0,
+      reasoning: 'Error in automated grading',
+    };
+  }
+}
+
+// ============================================
 // AI FEEDBACK GENERATION
 // ============================================
 
-async function generateEncouragingFeedback(question, studentSelected, isCorrect) {
-  const correctOptions = question.correctOptions;
-  const studentAnswers = question.options.filter((_, idx) => studentSelected.includes(idx));
+async function generateEncouragingFeedback(question, studentSelected, isCorrect, studentTextAnswer) {
+  // Handle short answer questions - return early to prevent falling through
+  if (question.type === 'short_answer') {
+    if (!studentTextAnswer) {
+      return 'Please provide an answer to this question. Take your time to think through the key concepts.';
+    }
+
+    const prompt = `You are a supportive and encouraging teacher providing feedback to a student.
+
+Question: ${question.questionText}
+Rubric/Key Points: ${question.rubric || 'Evaluate based on understanding of the core concepts'}
+Student's Answer: ${studentTextAnswer}
+Student's Score: ${isCorrect ? 'Full marks' : 'Partial or no marks'}
+
+Provide constructive, encouraging feedback (2-3 sentences). If the answer is correct, celebrate their understanding. If incorrect or partially correct, gently guide them toward the key concepts without discouraging them. Be warm and supportive.`;
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a supportive, encouraging teacher. Always use positive, growth-oriented language. Never discourage students. Focus on what they can learn and improve.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        max_tokens: 200,
+        temperature: 0.7,
+      });
+
+      return response.choices[0].message.content.trim();
+    } catch (error) {
+      console.error('Error generating feedback for short answer:', error);
+      return isCorrect
+        ? 'Great job! You demonstrated good understanding of the key concepts. Keep up the excellent work!'
+        : 'This question needs another look. Review the key concepts mentioned in the rubric and try to explain them in your own words. You\'ve got this!';
+    }
+  }
+
+  // Handle MCQ and True/False questions only (explicitly not short_answer)
+  // This block will only execute if question.type is NOT 'short_answer'
+  if (!question.options || !Array.isArray(question.options)) {
+    return 'Feedback unavailable for this question type.';
+  }
+
+  const correctOptions = question.correctOptions || [];
+  const studentAnswers = question.options.filter((_, idx) => (studentSelected || []).includes(idx));
   const correctAnswers = question.options.filter((_, idx) => correctOptions.includes(idx));
 
   if (isCorrect) {
@@ -1180,31 +1311,37 @@ Rubric/Context: ${question.rubric}
 
 The student got this question CORRECT. Provide brief, positive reinforcement (1-2 sentences). Be warm and encouraging.`;
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a supportive, encouraging teacher. Always use positive, growth-oriented language. Never discourage students. Focus on what they can learn and improve.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      max_tokens: 150,
-      temperature: 0.7,
-    });
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a supportive, encouraging teacher. Always use positive, growth-oriented language. Never discourage students. Focus on what they can learn and improve.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        max_tokens: 150,
+        temperature: 0.7,
+      });
 
-    return response.choices[0].message.content.trim();
+      return response.choices[0].message.content.trim();
+    } catch (error) {
+      console.error('Error generating feedback for correct answer:', error);
+      return 'Great job! You got this question correct. Keep up the excellent work!';
+    }
   } else {
+    // Handle incorrect MCQ/True-False answers
     const prompt = `You are a supportive and encouraging teacher providing feedback to a student.
 
 Question: ${question.questionText}
 Options: ${question.options.join(', ')}
 Correct Answer: ${correctAnswers.join(', ')}
-Student's Answer: ${studentAnswers.join(', ')}
-Rubric/Context: ${question.rubric}
+Student's Answer: ${studentAnswers.length > 0 ? studentAnswers.join(', ') : 'No answer selected'}
+Rubric/Context: ${question.rubric || 'N/A'}
 
 The student got this question INCORRECT. Provide encouraging, growth-oriented feedback (2-3 sentences):
 - Acknowledge their effort
@@ -1215,23 +1352,28 @@ The student got this question INCORRECT. Provide encouraging, growth-oriented fe
 
 Example tone: "You were on the right track! Consider focusing on [specific aspect]. Next time, try [helpful tip]."`;
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a supportive, encouraging teacher. Always use positive, growth-oriented language. Never discourage students. Focus on what they can learn and improve.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      max_tokens: 150,
-      temperature: 0.7,
-    });
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a supportive, encouraging teacher. Always use positive, growth-oriented language. Never discourage students. Focus on what they can learn and improve.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        max_tokens: 200,
+        temperature: 0.7,
+      });
 
-    return response.choices[0].message.content.trim();
+      return response.choices[0].message.content.trim();
+    } catch (error) {
+      console.error('Error generating feedback for incorrect answer:', error);
+      return 'This question needs another look. Review the concepts and try again—you\'ve got this!';
+    }
   }
 }
 
