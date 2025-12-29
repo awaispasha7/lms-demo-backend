@@ -1,20 +1,19 @@
 """
-Vercel serverless function entry point for Django
-CRITICAL: Nothing at module level except the handler function
-Vercel inspects the module at import time, and any module-level code
-can confuse its handler detection system.
+Vercel handler - Fixed version
+Key insight: Vercel inspects module at import time, so we need to be very careful
+about what's at module level. The issue is likely that Vercel is trying to inspect
+module-level variables or functions and getting confused.
 """
-# NO imports at module level
-# NO module-level variables
-# NO other functions
-# ONLY the handler function
+# DO NOT import anything Django-related at module level
+# DO NOT set any module-level variables that aren't simple types
+# DO NOT define any functions other than handler at module level
 
 def handler(req):
     """
-    Vercel serverless function handler
-    ALL setup happens inside this function to avoid Vercel detection issues
+    Vercel handler - ALL setup happens inside this function
+    This avoids Vercel's module inspection issues
     """
-    # Import everything inside handler (avoids module-level inspection issues)
+    # Import everything inside the handler
     import os
     import sys
     from pathlib import Path
@@ -31,7 +30,8 @@ def handler(req):
     os.environ.setdefault('VERCEL', '1')
     
     try:
-        # Lazy Django initialization using function attribute (not module-level variable)
+        # Lazy Django initialization (only when handler is called)
+        # Use a function-local cache to avoid module-level state
         if not hasattr(handler, '_django_app'):
             import django
             from django.core.wsgi import get_wsgi_application
@@ -127,3 +127,4 @@ def handler(req):
             'headers': {'Content-Type': 'text/plain; charset=utf-8'},
             'body': error_msg
         }
+
