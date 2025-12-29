@@ -107,7 +107,29 @@ if USE_SUPABASE:
     # Try to use DATABASE_URL if available (for Vercel)
     database_url = config('DATABASE_URL', default=None)
     if database_url and dj_database_url:
-        DATABASES['default'] = dj_database_url.parse(database_url, conn_max_age=0 if IS_VERCEL else 600)
+        try:
+            # Fix common URL format issues
+            # Supabase sometimes provides https:// URLs, but we need postgresql://
+            if database_url.startswith('https://'):
+                # Extract connection details from Supabase URL format
+                # Format: https://project.supabase.co
+                # We need: postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres
+                print("WARNING: DATABASE_URL starts with https:// - this won't work!")
+                print("Please use the PostgreSQL connection string from Supabase:")
+                print("Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
+                # Don't use the https URL, fall back to manual config
+                database_url = None
+            elif database_url.startswith('postgresql://') or database_url.startswith('postgres://'):
+                DATABASES['default'] = dj_database_url.parse(database_url, conn_max_age=0 if IS_VERCEL else 600)
+            else:
+                print(f"WARNING: Unknown DATABASE_URL format: {database_url[:50]}...")
+                print("Expected format: postgresql://user:password@host:port/database")
+        except Exception as e:
+            print(f"ERROR parsing DATABASE_URL: {str(e)}")
+            print("Please check your DATABASE_URL format in Vercel environment variables")
+            print("Expected format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
+            # Fall back to manual config if DATABASE_URL parsing fails
+            database_url = None
 else:
     # SQLite (local development)
     DATABASES = {
