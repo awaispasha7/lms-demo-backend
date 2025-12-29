@@ -14,7 +14,13 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-demo-key-change-in-pr
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,3.226.252.253', cast=lambda v: [s.strip() for s in v.split(',')])
+# Get Vercel domain from environment if available
+VERCEL_URL = os.environ.get('VERCEL_URL', '')
+default_hosts = 'localhost,127.0.0.1,3.226.252.253'
+if VERCEL_URL:
+    default_hosts += f',{VERCEL_URL},*.vercel.app'
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default=default_hosts, cast=lambda v: [s.strip() for s in v.split(',')])
 
 # Application definition
 INSTALLED_APPS = [
@@ -61,6 +67,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'lms_backend.context_processors.backend_api_url',
             ],
         },
     },
@@ -171,6 +178,10 @@ CORS_ALLOW_CREDENTIALS = True
 
 # OpenAI Settings
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
+
+# Backend API URL for frontend API calls
+# Set this to the client's backend URL if frontend should call external API
+BACKEND_API_URL = config('BACKEND_API_URL', default='http://3.226.252.253:8000')
 
 # Production Security Settings
 if not DEBUG:

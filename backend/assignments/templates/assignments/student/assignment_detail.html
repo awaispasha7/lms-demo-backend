@@ -118,7 +118,8 @@ function submissionForm() {
             };
             
             try {
-                const response = await fetch(`/api/student/assignments/{{ assignment.id }}/submit`, {
+                const apiUrl = window.BACKEND_API_URL || '';
+                const response = await fetch(`${apiUrl}/api/student/assignments/{{ assignment.id }}/submit`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

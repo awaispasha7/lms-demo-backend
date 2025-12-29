@@ -17,6 +17,7 @@ urlpatterns = [
     
     # Template views at root level
     path('', assignment_views.index, name='index'),
+    path('test-backend-url', assignment_views.test_backend_url, name='test_backend_url'),
     path('teacher', assignment_views.teacher_dashboard, name='teacher_dashboard'),
     path('teacher/assignments/list', assignment_views.teacher_assignment_list, name='teacher_assignment_list'),
     path('teacher/assignments/create', assignment_views.teacher_assignment_create, name='teacher_assignment_create'),

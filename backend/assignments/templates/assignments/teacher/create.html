@@ -185,7 +185,8 @@ function assignmentForm() {
             };
             
             try {
-                const response = await fetch('/api/teacher/assignments', {
+                const apiUrl = window.BACKEND_API_URL || '';
+                const response = await fetch(`${apiUrl}/api/teacher/assignments`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

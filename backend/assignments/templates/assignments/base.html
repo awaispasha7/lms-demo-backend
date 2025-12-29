@@ -10,6 +10,33 @@
     <style>
         [x-cloak] { display: none !important; }
     </style>
+    <script>
+        // Backend API URL - use client's backend URL for API calls
+        window.BACKEND_API_URL = '{{ BACKEND_API_URL }}' || '';
+        
+        // Configure HTMX to use backend API URL (after HTMX loads)
+        function configureHTMX() {
+            if (window.BACKEND_API_URL && window.htmx) {
+                // Configure HTMX to prepend backend URL to all API requests
+                document.body.addEventListener('htmx:configRequest', function(event) {
+                    const url = event.detail.path;
+                    if (url && url.startsWith('/api/')) {
+                        event.detail.path = window.BACKEND_API_URL + url;
+                    }
+                });
+            } else if (window.BACKEND_API_URL) {
+                // Retry if HTMX not loaded yet
+                setTimeout(configureHTMX, 100);
+            }
+        }
+        
+        // Try to configure when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', configureHTMX);
+        } else {
+            configureHTMX();
+        }
+    </script>
     {% block extra_css %}{% endblock %}
 </head>
 <body class="bg-gradient-to-br from-blue-50 via-white to-purple-50 min-h-screen">

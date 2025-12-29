@@ -414,3 +414,12 @@ def student_assignment_detail(request, assignment_id):
     context = {'assignment': assignment}
     return render(request, 'assignments/student/assignment_detail.html', context)
 
+
+def test_backend_url(request):
+    """Test page to verify backend API URL configuration"""
+    from django.conf import settings
+    context = {
+        'BACKEND_API_URL': getattr(settings, 'BACKEND_API_URL', '')
+    }
+    return render(request, 'assignments/test_backend_url.html', context)
+

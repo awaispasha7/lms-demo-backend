@@ -1,0 +1,84 @@
+{% extends 'assignments/base.html' %}
+
+{% block title %}Test Backend API URL{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold text-gray-900 mb-4">Backend API URL Configuration Test</h1>
+        
+        <div class="space-y-4">
+            <div>
+                <h2 class="text-lg font-semibold text-gray-700 mb-2">Configuration:</h2>
+                <div class="bg-gray-50 p-4 rounded">
+                    <p><strong>BACKEND_API_URL (from settings):</strong> <code class="text-indigo-600">{{ BACKEND_API_URL }}</code></p>
+                    <p class="mt-2"><strong>JavaScript window.BACKEND_API_URL:</strong> <code class="text-indigo-600" id="js-url">Loading...</code></p>
+                </div>
+            </div>
+            
+            <div>
+                <h2 class="text-lg font-semibold text-gray-700 mb-2">Test API Call:</h2>
+                <button onclick="testAPICall()" 
+                        class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                    Test API Call to Backend
+                </button>
+                <div id="test-result" class="mt-4 p-4 bg-gray-50 rounded hidden">
+                    <pre id="result-content" class="text-sm"></pre>
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <h2 class="text-lg font-semibold text-gray-700 mb-2">Expected Behavior:</h2>
+                <ul class="list-disc list-inside space-y-1 text-gray-600">
+                    <li>All API calls should go to: <code class="bg-gray-100 px-1 rounded">{{ BACKEND_API_URL }}/api/...</code></li>
+                    <li>HTMX requests to <code>/api/...</code> should be rewritten to use the backend URL</li>
+                    <li>Fetch calls should prepend the backend URL</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Display JavaScript variable
+document.getElementById('js-url').textContent = window.BACKEND_API_URL || '(not set)';
+
+// Test API call
+async function testAPICall() {
+    const resultDiv = document.getElementById('test-result');
+    const resultContent = document.getElementById('result-content');
+    
+    resultDiv.classList.remove('hidden');
+    resultContent.textContent = 'Testing...';
+    
+    try {
+        const apiUrl = window.BACKEND_API_URL || '';
+        const testUrl = `${apiUrl}/api/health`;
+        
+        resultContent.textContent = `Calling: ${testUrl}\n\n`;
+        
+        const response = await fetch(testUrl, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.text();
+        
+        resultContent.textContent += `Status: ${response.status}\n`;
+        resultContent.textContent += `Response: ${data}`;
+        
+        if (response.ok) {
+            resultDiv.className = 'mt-4 p-4 bg-green-50 rounded border border-green-200';
+        } else {
+            resultDiv.className = 'mt-4 p-4 bg-yellow-50 rounded border border-yellow-200';
+        }
+    } catch (error) {
+        resultContent.textContent = `Error: ${error.message}\n\nThis might be expected if:\n- The backend URL is not accessible\n- CORS is not configured\n- The endpoint doesn't exist`;
+        resultDiv.className = 'mt-4 p-4 bg-red-50 rounded border border-red-200';
+    }
+}
+</script>
+{% endblock %}
+
