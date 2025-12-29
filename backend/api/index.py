@@ -1,58 +1,66 @@
 """
 Vercel serverless function entry point for Django
-Minimal structure to avoid Vercel handler detection issues
+Ultra-minimal structure - only handler function at module level
 """
 import os
 import sys
 from pathlib import Path
-from io import BytesIO
 
-# Setup - keep minimal
+# Minimal setup - no Django imports at module level
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
 os.environ.setdefault('VERCEL', '1')
 
-# Initialize Django at module level (Vercel prefers this)
-import django
-from django.core.wsgi import get_wsgi_application
-django.setup()
-_application = get_wsgi_application()
+# Global cache for Django app
+_app_cache = None
 
-def _handle_request(req):
+def handler(req):
     """
-    Internal request handler - processes the actual request
+    Vercel serverless function handler
+    Everything happens inside this function to avoid Vercel detection issues
     """
+    global _app_cache
+    
     try:
+        # Lazy Django initialization
+        if _app_cache is None:
+            import django
+            from django.core.wsgi import get_wsgi_application
+            django.setup()
+            _app_cache = get_wsgi_application()
+        
+        app = _app_cache
+        
         from urllib.parse import urlencode
+        from io import BytesIO
         
-        # Extract request data - Vercel provides req as dict
-        method = req.get('method', 'GET') if isinstance(req, dict) else getattr(req, 'method', 'GET')
-        path = req.get('path', '/') if isinstance(req, dict) else getattr(req, 'path', '/')
-        headers = req.get('headers', {}) if isinstance(req, dict) else getattr(req, 'headers', {})
-        body = req.get('body', b'') if isinstance(req, dict) else getattr(req, 'body', b'')
-        query = req.get('query', {}) if isinstance(req, dict) else getattr(req, 'query', {})
+        # Extract request data
+        if isinstance(req, dict):
+            method = req.get('method', 'GET')
+            path = req.get('path', '/')
+            headers = req.get('headers', {})
+            body = req.get('body', b'')
+            query = req.get('query', {})
+        else:
+            method = getattr(req, 'method', 'GET')
+            path = getattr(req, 'path', '/')
+            headers = getattr(req, 'headers', {})
+            body = getattr(req, 'body', b'')
+            query = getattr(req, 'query', {})
         
-        # Normalize headers to dict
+        # Normalize
         if not isinstance(headers, dict):
-            try:
-                headers = dict(headers) if hasattr(headers, 'items') else {}
-            except:
-                headers = {}
-        
-        # Build query string
+            headers = dict(headers) if hasattr(headers, 'items') else {}
+        if isinstance(body, str):
+            body = body.encode('utf-8')
+        elif body is None:
+            body = b''
         if isinstance(query, dict):
             query_string = urlencode(query) if query else ''
         else:
             query_string = str(query) if query else ''
         
-        # Normalize body
-        if isinstance(body, str):
-            body = body.encode('utf-8')
-        elif body is None:
-            body = b''
-        
-        # Get host from headers
         host = headers.get('host', headers.get('Host', ''))
         
         # Build WSGI environ
@@ -74,15 +82,12 @@ def _handle_request(req):
             'HTTP_HOST': host,
         }
         
-        # Add all headers to environ (WSGI format)
+        # Add headers
         for key, value in headers.items():
-            # Skip Content-Type and Content-Length (already set)
-            if key.lower() in ('content-type', 'content-length'):
-                continue
-            environ_key = f'HTTP_{key.upper().replace("-", "_")}'
-            environ[environ_key] = str(value)
+            if key.lower() not in ('content-type', 'content-length'):
+                environ[f'HTTP_{key.upper().replace("-", "_")}'] = str(value)
         
-        # Response status and headers
+        # Process request
         status_code = 200
         response_headers = []
         response_body = []
@@ -92,44 +97,28 @@ def _handle_request(req):
             status_code = int(status.split()[0])
             response_headers = headers
         
-        # Process through Django WSGI application
-        response = _application(environ, start_response)
+        response = app(environ, start_response)
         
-        # Collect response body
         for chunk in response:
             response_body.append(chunk)
         
-        # Close response if it has close method
         if hasattr(response, 'close'):
             response.close()
         
-        # Build response dict
-        headers_dict = {header: value for header, value in response_headers}
         body = b''.join(response_body)
         
-        # Return dict format (Vercel Python runtime format)
         return {
             'statusCode': status_code,
-            'headers': headers_dict,
+            'headers': dict(response_headers),
             'body': body.decode('utf-8') if isinstance(body, bytes) else str(body)
         }
         
     except Exception as e:
-        error_trace = traceback.format_exc()
-        error_msg = f"Handler error: {str(e)}\n\nTraceback:\n{error_trace}"
-        
-        # Log to Vercel logs
-        print(f"Handler exception: {error_msg}")
-        
+        import traceback
+        error_msg = f"Handler error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        print(error_msg)
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'text/plain; charset=utf-8'},
             'body': error_msg
         }
-
-# Export handler function - Vercel Python runtime expects this
-# Must be at module level with exact name 'handler'
-# Vercel handler - must be exactly named 'handler' at module level
-def handler(req):
-    """Vercel serverless function handler"""
-    return _handle_request(req)
