@@ -26,20 +26,26 @@ application = get_wsgi_application()
 def handler(req):
     """
     Handle Vercel serverless requests
-    Vercel Python runtime provides req object with method, path, headers, body
+    Vercel Python runtime may provide req as dict or object
     """
-    # Build WSGI environ from Vercel request
-    query_string = ''
-    if hasattr(req, 'query') and req.query:
-        from urllib.parse import urlencode
-        query_string = urlencode(req.query)
-    elif hasattr(req, 'query_string'):
-        query_string = req.query_string or ''
+    from urllib.parse import urlencode
     
-    path = getattr(req, 'path', '/')
-    method = getattr(req, 'method', 'GET')
-    headers = getattr(req, 'headers', {})
-    body = getattr(req, 'body', b'')
+    # Handle both dict and object formats
+    if isinstance(req, dict):
+        method = req.get('method', 'GET')
+        path = req.get('path', '/')
+        headers = req.get('headers', {})
+        body = req.get('body', b'')
+        query = req.get('query', {})
+    else:
+        method = getattr(req, 'method', 'GET')
+        path = getattr(req, 'path', '/')
+        headers = getattr(req, 'headers', {})
+        body = getattr(req, 'body', b'')
+        query = getattr(req, 'query', {})
+    
+    # Build query string
+    query_string = urlencode(query) if query else ''
     
     if isinstance(body, str):
         body = body.encode('utf-8')
