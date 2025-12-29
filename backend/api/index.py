@@ -1,73 +1,29 @@
 """
 Vercel serverless function entry point for Django
-This file handles all requests and routes them through Django
+Minimal structure to avoid Vercel handler detection issues
 """
 import os
 import sys
-import traceback
 from pathlib import Path
 from io import BytesIO
 
-# Catch any module-level errors
-_module_error = None
-try:
-    # Add project root to Python path
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(BASE_DIR))
+# Setup - keep minimal
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
+os.environ.setdefault('VERCEL', '1')
 
-    # Set Django settings
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
-    os.environ.setdefault('VERCEL', '1')
-except Exception as e:
-    _module_error = f"Module initialization error: {str(e)}\n\n{traceback.format_exc()}"
+# Initialize Django at module level (Vercel prefers this)
+import django
+from django.core.wsgi import get_wsgi_application
+django.setup()
+_application = get_wsgi_application()
 
-# Lazy Django initialization
-application = None
-django_error = None
-
-def get_application():
-    """Lazy initialization of Django application"""
-    global application, django_error
-    if application is not None:
-        return application
-    
-    try:
-        import django
-        from django.core.wsgi import get_wsgi_application
-        
-        django.setup()
-        application = get_wsgi_application()
-        return application
-    except Exception as e:
-        django_error = str(e)
-        import traceback
-        django_error += "\n\n" + traceback.format_exc()
-        return None
-
-# Vercel handler - must be a callable at module level
-# The handler function will be called by Vercel's runtime
 def _handle_request(req):
     """
     Internal request handler - processes the actual request
     """
-    # Check for module-level errors first
-    if _module_error:
-        return {
-            'statusCode': 500,
-            'headers': {'Content-Type': 'text/plain; charset=utf-8'},
-            'body': f"Module initialization error:\n\n{_module_error}"
-        }
-    
     try:
-        # Initialize Django application (lazy)
-        app = get_application()
-        if app is None:
-            return {
-                'statusCode': 500,
-                'headers': {'Content-Type': 'text/plain; charset=utf-8'},
-                'body': f"Django initialization failed:\n\n{django_error}"
-            }
-        
         from urllib.parse import urlencode
         
         # Extract request data - Vercel provides req as dict
@@ -137,7 +93,7 @@ def _handle_request(req):
             response_headers = headers
         
         # Process through Django WSGI application
-        response = app(environ, start_response)
+        response = _application(environ, start_response)
         
         # Collect response body
         for chunk in response:
@@ -172,7 +128,8 @@ def _handle_request(req):
         }
 
 # Export handler function - Vercel Python runtime expects this
-# Make it a simple function at module level
+# Must be at module level with exact name 'handler'
+# Vercel handler - must be exactly named 'handler' at module level
 def handler(req):
     """Vercel serverless function handler"""
     return _handle_request(req)
