@@ -8,20 +8,41 @@ import traceback
 from pathlib import Path
 from io import BytesIO
 
-# Add project root to Python path
-BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BASE_DIR))
+# Catch any module-level errors
+_module_error = None
+try:
+    # Add project root to Python path
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(BASE_DIR))
 
-# Set Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
-os.environ.setdefault('VERCEL', '1')
+    # Set Django settings
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
+    os.environ.setdefault('VERCEL', '1')
+except Exception as e:
+    _module_error = f"Module initialization error: {str(e)}\n\n{traceback.format_exc()}"
 
-# Initialize Django - do this at module level
-import django
-from django.core.wsgi import get_wsgi_application
+# Lazy Django initialization
+application = None
+django_error = None
 
-django.setup()
-application = get_wsgi_application()
+def get_application():
+    """Lazy initialization of Django application"""
+    global application, django_error
+    if application is not None:
+        return application
+    
+    try:
+        import django
+        from django.core.wsgi import get_wsgi_application
+        
+        django.setup()
+        application = get_wsgi_application()
+        return application
+    except Exception as e:
+        django_error = str(e)
+        import traceback
+        django_error += "\n\n" + traceback.format_exc()
+        return None
 
 # Vercel handler function
 # Vercel Python runtime expects handler(req) that returns a dict
@@ -30,7 +51,24 @@ def handler(req):
     Handle Vercel serverless requests
     Vercel Python runtime provides req as a dict with method, path, headers, body, query
     """
+    # Check for module-level errors first
+    if _module_error:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'text/plain; charset=utf-8'},
+            'body': f"Module initialization error:\n\n{_module_error}"
+        }
+    
     try:
+        # Initialize Django application (lazy)
+        app = get_application()
+        if app is None:
+            return {
+                'statusCode': 500,
+                'headers': {'Content-Type': 'text/plain; charset=utf-8'},
+                'body': f"Django initialization failed:\n\n{django_error}"
+            }
+        
         from urllib.parse import urlencode
         
         # Extract request data - Vercel provides req as dict
@@ -100,7 +138,7 @@ def handler(req):
             response_headers = headers
         
         # Process through Django WSGI application
-        response = application(environ, start_response)
+        response = app(environ, start_response)
         
         # Collect response body
         for chunk in response:
