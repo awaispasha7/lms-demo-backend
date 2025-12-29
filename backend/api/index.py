@@ -44,12 +44,11 @@ def get_application():
         django_error += "\n\n" + traceback.format_exc()
         return None
 
-# Vercel handler function
-# Vercel Python runtime expects handler(req) that returns a dict
-def handler(req):
+# Vercel handler - must be a callable at module level
+# The handler function will be called by Vercel's runtime
+def _handle_request(req):
     """
-    Handle Vercel serverless requests
-    Vercel Python runtime provides req as a dict with method, path, headers, body, query
+    Internal request handler - processes the actual request
     """
     # Check for module-level errors first
     if _module_error:
@@ -163,8 +162,17 @@ def handler(req):
         error_trace = traceback.format_exc()
         error_msg = f"Handler error: {str(e)}\n\nTraceback:\n{error_trace}"
         
+        # Log to Vercel logs
+        print(f"Handler exception: {error_msg}")
+        
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'text/plain; charset=utf-8'},
             'body': error_msg
         }
+
+# Export handler function - Vercel Python runtime expects this
+# Make it a simple function at module level
+def handler(req):
+    """Vercel serverless function handler"""
+    return _handle_request(req)
