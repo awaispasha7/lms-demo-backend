@@ -1,49 +1,52 @@
-"""
-Vercel serverless function entry point for Django
-This file handles all requests and routes them through Django
-"""
+# Vercel Deployment Fix
+
+## Issue
+The build completes but the handler format might not be compatible with Vercel's Python runtime.
+
+## Solution
+The `api/index.py` handler has been updated to work with Vercel's Python runtime. However, if you still encounter issues, try these alternatives:
+
+### Option 1: Use the updated handler (current)
+The handler now expects a `req` object with `method`, `path`, `headers`, and `body` attributes.
+
+### Option 2: If Option 1 doesn't work, try this alternative format:
+
+Create a new `api/index.py` with:
+
+```python
 import os
 import sys
 from pathlib import Path
-from io import BytesIO
 
-# Add project root to Python path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-# Set Django settings
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
 os.environ.setdefault('VERCEL', '1')
 
-# Initialize Django
 import django
 from django.core.wsgi import get_wsgi_application
 
 django.setup()
 application = get_wsgi_application()
 
-# Vercel handler function
-def handler(req):
-    """
-    Handle Vercel serverless requests
-    Vercel Python runtime provides req object with method, path, headers, body
-    """
-    # Build WSGI environ from Vercel request
-    query_string = ''
-    if hasattr(req, 'query') and req.query:
-        from urllib.parse import urlencode
-        query_string = urlencode(req.query)
-    elif hasattr(req, 'query_string'):
-        query_string = req.query_string or ''
+def handler(request):
+    from io import BytesIO
+    from urllib.parse import urlencode
     
-    path = getattr(req, 'path', '/')
-    method = getattr(req, 'method', 'GET')
-    headers = getattr(req, 'headers', {})
-    body = getattr(req, 'body', b'')
+    # Extract request data
+    method = request.get('method', 'GET')
+    path = request.get('path', '/')
+    headers = request.get('headers', {})
+    body = request.get('body', b'')
+    query = request.get('query', {})
     
     if isinstance(body, str):
         body = body.encode('utf-8')
     
+    query_string = urlencode(query) if query else ''
+    
+    # Build WSGI environ
     environ = {
         'REQUEST_METHOD': method,
         'PATH_INFO': path,
@@ -62,12 +65,11 @@ def handler(req):
         'HTTP_HOST': headers.get('host', ''),
     }
     
-    # Add all headers to environ
+    # Add headers
     for key, value in headers.items():
-        environ_key = f'HTTP_{key.upper().replace("-", "_")}'
-        environ[environ_key] = value
+        environ[f'HTTP_{key.upper().replace("-", "_")}'] = value
     
-    # Response status and headers
+    # Process request
     status_code = 200
     response_headers = []
     response_body = []
@@ -77,19 +79,27 @@ def handler(req):
         status_code = int(status.split()[0])
         response_headers = headers
     
-    # Process through Django WSGI application
     response = application(environ, start_response)
     
-    # Collect response body
     for chunk in response:
         response_body.append(chunk)
     
-    # Build response dict
-    headers_dict = {header: value for header, value in response_headers}
     body = b''.join(response_body)
     
     return {
         'statusCode': status_code,
-        'headers': headers_dict,
+        'headers': dict(response_headers),
         'body': body.decode('utf-8') if isinstance(body, bytes) else str(body)
     }
+```
+
+### Environment Variables Required in Vercel:
+- `SECRET_KEY` - Django secret key
+- `DEBUG` - Set to `False` for production
+- `DATABASE_URL` - Your Supabase connection string
+- `USE_SUPABASE` - Set to `True`
+- `ALLOWED_HOSTS` - Include your Vercel domain
+
+### Static Files
+Make sure `STATIC_ROOT` is set in settings.py and run `collectstatic` during build, or configure Vercel to serve static files.
+
