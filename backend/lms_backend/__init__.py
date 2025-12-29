@@ -1,0 +1,2 @@
+# LMS Backend Django Project
+

@@ -1,0 +1,76 @@
+{% if assignments %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for assignment in assignments %}
+    <div class="bg-white rounded-lg shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-gray-200">
+        <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+                <h3 class="text-xl font-semibold text-gray-900 line-clamp-2">{{ assignment.title }}</h3>
+                <span class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                    {{ assignment.questions|length }} Q
+                </span>
+            </div>
+            
+            {% if assignment.description %}
+            <p class="text-gray-600 text-sm mb-4 line-clamp-2">{{ assignment.description }}</p>
+            {% endif %}
+            
+            <div class="space-y-2 mb-4">
+                <div class="flex items-center text-sm text-gray-500">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    {% if assignment.due_date %}
+                        Due: {{ assignment.due_date|date:"M d, Y" }}
+                    {% else %}
+                        No due date
+                    {% endif %}
+                </div>
+                
+                <div class="flex items-center text-sm text-gray-500">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    {{ assignment.total_submissions }} submission{{ assignment.total_submissions|pluralize }}
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-between pt-4 border-t border-gray-200">
+                <div class="flex space-x-2">
+                    {% if assignment.pending_count > 0 %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        {{ assignment.pending_count }} pending
+                    </span>
+                    {% endif %}
+                    {% if assignment.graded_count > 0 %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        {{ assignment.graded_count }} graded
+                    </span>
+                    {% endif %}
+                </div>
+                
+                <a href="/teacher/assignments/{{ assignment.id }}" class="text-indigo-600 hover:text-indigo-800 font-medium text-sm">
+                    View →
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-12">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+    </svg>
+    <h3 class="mt-2 text-sm font-medium text-gray-900">No assignments</h3>
+    <p class="mt-1 text-sm text-gray-500">Get started by creating a new assignment.</p>
+    <div class="mt-6">
+        <a href="/teacher/assignments/create" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            Create Assignment
+        </a>
+    </div>
+</div>
+{% endif %}
+
