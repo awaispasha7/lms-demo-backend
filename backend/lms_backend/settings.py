@@ -23,6 +23,7 @@ if VERCEL_URL:
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default=default_hosts, cast=lambda v: [s.strip() for s in v.split(',')])
 
 # Application definition
+# Frontend-only: Only apps needed for template rendering
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -30,16 +31,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework',
-    'rest_framework.authtoken',
-    'corsheaders',
-    'users',
-    'academics',
-    'assignments',
-    'attendance',
-    'reports',
-    'policies',
-    'ai',
+    'corsheaders',  # For CORS if needed
+    'assignments',  # Only assignments app for templates
 ]
 
 MIDDLEWARE = [
@@ -76,68 +69,14 @@ TEMPLATES = [
 WSGI_APPLICATION = 'lms_backend.wsgi.application'
 
 # Database Configuration
-USE_SUPABASE = config('USE_SUPABASE', default=False, cast=bool)
-IS_VERCEL = config('VERCEL', default=False, cast=bool)
-
-if USE_SUPABASE:
-    # Supabase PostgreSQL
-    try:
-        import dj_database_url
-    except ImportError:
-        dj_database_url = None
-    
-    # Use connection pooling for Vercel
-    db_config = {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('SUPABASE_DB_NAME', default='postgres'),
-        'USER': config('SUPABASE_DB_USER', default='postgres'),
-        'PASSWORD': config('SUPABASE_DB_PASSWORD', default=''),
-        'HOST': config('SUPABASE_DB_HOST', default='localhost'),
-        'PORT': config('SUPABASE_DB_PORT', default='5432'),
+# Frontend-only: Use SQLite for Django's internal needs (sessions, admin)
+# All application data comes from client's backend API
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
-    
-    # For Vercel, use connection pooling (disable persistent connections)
-    if IS_VERCEL:
-        db_config['CONN_MAX_AGE'] = 0  # Disable persistent connections for serverless
-    
-    DATABASES = {
-        'default': db_config
-    }
-    
-    # Try to use DATABASE_URL if available (for Vercel)
-    database_url = config('DATABASE_URL', default=None)
-    if database_url and dj_database_url:
-        try:
-            # Fix common URL format issues
-            # Supabase sometimes provides https:// URLs, but we need postgresql://
-            if database_url.startswith('https://'):
-                # Extract connection details from Supabase URL format
-                # Format: https://project.supabase.co
-                # We need: postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres
-                print("WARNING: DATABASE_URL starts with https:// - this won't work!")
-                print("Please use the PostgreSQL connection string from Supabase:")
-                print("Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
-                # Don't use the https URL, fall back to manual config
-                database_url = None
-            elif database_url.startswith('postgresql://') or database_url.startswith('postgres://'):
-                DATABASES['default'] = dj_database_url.parse(database_url, conn_max_age=0 if IS_VERCEL else 600)
-            else:
-                print(f"WARNING: Unknown DATABASE_URL format: {database_url[:50]}...")
-                print("Expected format: postgresql://user:password@host:port/database")
-        except Exception as e:
-            print(f"ERROR parsing DATABASE_URL: {str(e)}")
-            print("Please check your DATABASE_URL format in Vercel environment variables")
-            print("Expected format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
-            # Fall back to manual config if DATABASE_URL parsing fails
-            database_url = None
-else:
-    # SQLite (local development)
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -171,21 +110,8 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Custom User Model
-AUTH_USER_MODEL = 'users.User'
-
-# REST Framework Settings
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
-    ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',  # For demo purposes
-    ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
-}
+# Frontend-only: No custom user model or REST framework needed
+# All authentication and API calls go to client's backend
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [

@@ -1,21 +1,16 @@
 """
 URL configuration for lms_backend project.
+Frontend-only: All data comes from client's backend API.
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path
 from assignments import views as assignment_views
 
 urlpatterns = [
+    # Admin (optional, for Django admin if needed)
     path('admin/', admin.site.urls),
-    path('api/users/', include('users.urls')),
-    path('api/academics/', include('academics.urls')),
-    path('api/assignments/', include('assignments.urls')),  # API endpoints only
-    path('api/attendance/', include('attendance.urls')),
-    path('api/reports/', include('reports.urls')),
-    path('api/policies/', include('policies.urls')),
-    path('api/ai/', include('ai.urls')),
     
-    # Template views at root level
+    # Frontend pages only - all data comes from client's backend API
     path('', assignment_views.index, name='index'),
     path('test-backend-url', assignment_views.test_backend_url, name='test_backend_url'),
     path('teacher', assignment_views.teacher_dashboard, name='teacher_dashboard'),

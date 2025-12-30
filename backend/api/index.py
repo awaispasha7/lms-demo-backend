@@ -1,46 +1,27 @@
-"""
-Vercel serverless function entry point for Django
-CRITICAL: Nothing at module level except the handler function
-Vercel inspects the module at import time, and any module-level code
-can confuse its handler detection system.
-"""
-# NO imports at module level
-# NO module-level variables
-# NO other functions
-# ONLY the handler function
-
 def handler(req):
-    """
-    Vercel serverless function handler
-    ALL setup happens inside this function to avoid Vercel detection issues
-    """
-    # Import everything inside handler (avoids module-level inspection issues)
+    """Vercel handler - absolute minimum"""
     import os
     import sys
     from pathlib import Path
     from io import BytesIO
     from urllib.parse import urlencode
     
-    # Setup paths (only when handler is called)
     BASE_DIR = Path(__file__).resolve().parent.parent
     if str(BASE_DIR) not in sys.path:
         sys.path.insert(0, str(BASE_DIR))
     
-    # Set environment
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lms_backend.settings')
     os.environ.setdefault('VERCEL', '1')
     
     try:
-        # Lazy Django initialization using function attribute (not module-level variable)
-        if not hasattr(handler, '_django_app'):
+        if not hasattr(handler, '_app'):
             import django
             from django.core.wsgi import get_wsgi_application
             django.setup()
-            handler._django_app = get_wsgi_application()
+            handler._app = get_wsgi_application()
         
-        app = handler._django_app
+        app = handler._app
         
-        # Extract request data
         if isinstance(req, dict):
             method = req.get('method', 'GET')
             path = req.get('path', '/')
@@ -54,21 +35,19 @@ def handler(req):
             body = getattr(req, 'body', b'')
             query = getattr(req, 'query', {})
         
-        # Normalize
         if not isinstance(headers, dict):
-            headers = dict(headers) if hasattr(headers, 'items') else {}
+            headers = {}
         if isinstance(body, str):
             body = body.encode('utf-8')
-        elif body is None:
+        if body is None:
             body = b''
         if isinstance(query, dict):
             query_string = urlencode(query) if query else ''
         else:
-            query_string = str(query) if query else ''
+            query_string = ''
         
         host = headers.get('host', headers.get('Host', ''))
         
-        # Build WSGI environ
         environ = {
             'REQUEST_METHOD': method,
             'PATH_INFO': path,
@@ -87,12 +66,10 @@ def handler(req):
             'HTTP_HOST': host,
         }
         
-        # Add headers
         for key, value in headers.items():
             if key.lower() not in ('content-type', 'content-length'):
                 environ[f'HTTP_{key.upper().replace("-", "_")}'] = str(value)
         
-        # Process request
         status_code = 200
         response_headers = []
         response_body = []
@@ -120,10 +97,8 @@ def handler(req):
         
     except Exception as e:
         import traceback
-        error_msg = f"Handler error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-        print(error_msg)
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'text/plain; charset=utf-8'},
-            'body': error_msg
+            'body': f"Error: {str(e)}\n\n{traceback.format_exc()}"
         }
